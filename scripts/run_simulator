@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-flutter clean && flutter pub get
 cd /Users/david/AndroidStudioProjects/flutter/Strange_rocks_01
+flutter clean && flutter pub get && cd ios && pod install && cd ..
 flutter run -d 1E7B6B4F-4948-4263-96D7-744561DB002A --target lib/main.dart

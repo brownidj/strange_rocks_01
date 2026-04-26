@@ -1,0 +1,23 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "JCU Townsville Campus (approx)"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [146.7406, -19.3379],
+            [146.7798, -19.3379],
+            [146.7798, -19.3078],
+            [146.7406, -19.3078],
+            [146.7406, -19.3379]
+          ]
+        ]
+      }
+    }
+  ]
+}
