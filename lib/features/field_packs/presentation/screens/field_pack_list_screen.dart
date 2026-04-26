@@ -190,6 +190,8 @@ class _FieldPackListScreenState extends State<FieldPackListScreen> {
                           separatorBuilder: (_, _) => const SizedBox(height: 8),
                           itemBuilder: (context, index) {
                             final pack = widget.controller.packs[index];
+                            final displayName =
+                                pack.areaName ?? pack.name ?? pack.id;
                             return Card(
                               child: Padding(
                                 padding: const EdgeInsets.all(12),
@@ -200,7 +202,7 @@ class _FieldPackListScreenState extends State<FieldPackListScreen> {
                                       children: [
                                         Expanded(
                                           child: Text(
-                                            pack.id,
+                                            displayName,
                                             style: const TextStyle(
                                               fontWeight: FontWeight.bold,
                                             ),

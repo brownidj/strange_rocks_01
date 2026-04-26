@@ -12,6 +12,7 @@ class FieldPackManifestValidator {
 
   FieldPackManifest validate(Map<String, Object?> manifestJson) {
     final packId = _requiredString(manifestJson, 'pack_id');
+    final name = _optionalString(manifestJson, 'name');
     final version = _requiredString(manifestJson, 'version');
     final createdAtUtc = _requiredString(manifestJson, 'created_at_utc');
     final crs = _requiredString(manifestJson, 'crs');
@@ -58,6 +59,7 @@ class FieldPackManifestValidator {
 
     return FieldPackManifest(
       packId: packId,
+      name: name,
       version: version,
       createdAtUtc: createdAtUtc,
       crs: crs,
@@ -155,6 +157,19 @@ class FieldPackManifestValidator {
     }
     throw FieldPackManifestValidationError(
       '$key is required and must be a non-empty string',
+    );
+  }
+
+  String? _optionalString(Map<String, Object?> root, String key) {
+    final value = root[key];
+    if (value == null) {
+      return null;
+    }
+    if (value is String && value.trim().isNotEmpty) {
+      return value;
+    }
+    throw FieldPackManifestValidationError(
+      '$key must be a non-empty string when provided',
     );
   }
 

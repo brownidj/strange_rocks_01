@@ -39,11 +39,22 @@ ON CONFLICT(id) DO UPDATE SET
   }
 
   @override
+  Future<void> linkFieldAreaToPack(String areaId, String packId) {
+    return _withDatabase<void>((db) {
+      db.execute(
+        'UPDATE field_areas SET pack_id = ? WHERE id = ?',
+        <Object?>[packId, areaId],
+      );
+    });
+  }
+
+  @override
   Future<void> savePackManifest(
     FieldPackManifest manifest, {
     required String localRootPath,
     String? name,
   }) {
+    final resolvedName = name ?? manifest.name;
     return _withDatabase<void>((db) {
       db.execute(
         '''
@@ -62,7 +73,7 @@ ON CONFLICT(id) DO UPDATE SET
         <Object?>[
           manifest.packId,
           manifest.version,
-          name,
+          resolvedName,
           FieldPackStatusMapper.toDb(FieldPackStatus.downloading),
           localRootPath,
           jsonEncode(FieldPackManifestMapper.toJson(manifest)),
@@ -135,7 +146,14 @@ WHERE id = ?
   Future<FieldPack?> getFieldPackById(String packId) {
     return _withDatabase<FieldPack?>((db) {
       final rows = db.select(
-        'SELECT * FROM field_packs WHERE id = ? LIMIT 1',
+        '''
+SELECT fp.*, fa.name AS area_name
+FROM field_packs fp
+LEFT JOIN field_areas fa ON fa.pack_id = fp.id
+WHERE fp.id = ?
+ORDER BY fa.created_at_utc DESC
+LIMIT 1
+''',
         <Object?>[packId],
       );
       if (rows.isEmpty) {
@@ -149,7 +167,17 @@ WHERE id = ?
   Future<List<FieldPack>> listFieldPacks() {
     return _withDatabase<List<FieldPack>>((db) {
       final rows = db.select(
-        'SELECT * FROM field_packs ORDER BY created_at_utc DESC',
+        '''
+SELECT fp.*, (
+  SELECT fa.name
+  FROM field_areas fa
+  WHERE fa.pack_id = fp.id
+  ORDER BY fa.created_at_utc DESC
+  LIMIT 1
+) AS area_name
+FROM field_packs fp
+ORDER BY fp.created_at_utc DESC
+''',
       );
       return rows.map(_mapPack).toList(growable: false);
     });
@@ -159,7 +187,14 @@ WHERE id = ?
   Future<FieldPack?> getActiveFieldPack() {
     return _withDatabase<FieldPack?>((db) {
       final rows = db.select(
-        'SELECT * FROM field_packs WHERE is_active = 1 LIMIT 1',
+        '''
+SELECT fp.*, fa.name AS area_name
+FROM field_packs fp
+LEFT JOIN field_areas fa ON fa.pack_id = fp.id
+WHERE fp.is_active = 1
+ORDER BY fa.created_at_utc DESC
+LIMIT 1
+''',
       );
       if (rows.isEmpty) {
         return null;
@@ -206,6 +241,7 @@ VALUES (?, ?, ?, ?, ?, 0)
       id: row['id'] as String,
       version: row['version'] as String,
       name: row['name'] as String?,
+      areaName: row['area_name'] as String?,
       status: FieldPackStatusMapper.fromDb(row['status'] as String),
       localRootPath: row['local_root_path'] as String,
       createdAtUtc: row['created_at_utc'] as String,

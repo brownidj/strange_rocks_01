@@ -5,6 +5,7 @@ import 'package:strange_rocks_01/features/field_packs/domain/entities/field_pack
 
 abstract interface class FieldPackRepository {
   Future<void> saveFieldArea(FieldArea area);
+  Future<void> linkFieldAreaToPack(String areaId, String packId);
   Future<void> savePackManifest(
     FieldPackManifest manifest, {
     required String localRootPath,

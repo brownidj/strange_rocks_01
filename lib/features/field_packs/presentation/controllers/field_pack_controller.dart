@@ -7,17 +7,21 @@ import 'package:strange_rocks_01/features/field_packs/domain/entities/field_area
 import 'package:strange_rocks_01/features/field_packs/domain/entities/field_pack.dart';
 import 'package:strange_rocks_01/features/field_packs/domain/repositories/field_pack_repository.dart';
 import 'package:strange_rocks_01/features/field_packs/domain/use_cases/download_field_pack_use_case.dart';
+import 'package:strange_rocks_01/features/field_packs/domain/use_cases/request_field_pack_use_case.dart';
 import 'package:strange_rocks_01/features/field_packs/presentation/models/field_pack_notes.dart';
 
 class FieldPackController extends ChangeNotifier {
   FieldPackController({
     required FieldPackRepository repository,
     required DownloadFieldPackUseCase downloadFieldPack,
+    required RequestFieldPackUseCase requestFieldPack,
   }) : _repository = repository,
-       _downloadFieldPack = downloadFieldPack;
+       _downloadFieldPack = downloadFieldPack,
+       _requestFieldPack = requestFieldPack;
 
   final FieldPackRepository _repository;
   final DownloadFieldPackUseCase _downloadFieldPack;
+  final RequestFieldPackUseCase _requestFieldPack;
 
   List<FieldPack> packs = const <FieldPack>[];
   bool isLoading = false;
@@ -40,16 +44,18 @@ class FieldPackController extends ChangeNotifier {
       }
 
       final now = DateTime.now().toUtc();
-      final packId = _buildPackId(areaName, now);
+      final localAreaId = _buildAreaId(areaName, now);
       final area = FieldArea(
-        id: 'area-$packId',
+        id: localAreaId,
         name: areaName,
         geoJson: geoJson,
         bbox: _extractBoundingBox(geoJson),
       );
 
       await _repository.saveFieldArea(area);
+      final packId = await _requestFieldPack(area);
       await _downloadFieldPack(packId);
+      await _repository.linkFieldAreaToPack(localAreaId, packId);
       packs = await _repository.listFieldPacks();
     });
   }
@@ -100,12 +106,12 @@ class FieldPackController extends ChangeNotifier {
     return file.readAsString();
   }
 
-  String _buildPackId(String areaName, DateTime nowUtc) {
+  String _buildAreaId(String areaName, DateTime nowUtc) {
     final safe = areaName
         .toLowerCase()
         .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
         .replaceAll(RegExp(r'^-|-$'), '');
-    return '$safe-${nowUtc.millisecondsSinceEpoch}';
+    return 'area-$safe-${nowUtc.millisecondsSinceEpoch}';
   }
 
   Map<String, num> _extractBoundingBox(Map<String, Object?> geoJson) {

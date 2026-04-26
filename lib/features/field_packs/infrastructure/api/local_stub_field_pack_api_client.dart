@@ -27,6 +27,7 @@ class LocalStubFieldPackApiClient implements FieldPackApiClient {
 
     return <String, Object?>{
       'pack_id': packId,
+      'name': 'Stub $packId',
       'version': '1.0.0',
       'created_at_utc': DateTime.now().toUtc().toIso8601String(),
       'crs': 'EPSG:4326',

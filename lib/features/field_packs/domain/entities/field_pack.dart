@@ -11,6 +11,7 @@ class FieldPack {
     required this.createdAtUtc,
     required this.manifest,
     this.name,
+    this.areaName,
     this.downloadedAtUtc,
     this.isActive = false,
   });
@@ -18,6 +19,7 @@ class FieldPack {
   final String id;
   final String version;
   final String? name;
+  final String? areaName;
   final FieldPackStatus status;
   final String localRootPath;
   final String createdAtUtc;

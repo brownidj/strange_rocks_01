@@ -4,6 +4,7 @@ import 'package:strange_rocks_01/features/field_packs/domain/entities/field_pack
 class FieldPackManifest {
   const FieldPackManifest({
     required this.packId,
+    this.name,
     required this.version,
     required this.createdAtUtc,
     required this.crs,
@@ -14,6 +15,7 @@ class FieldPackManifest {
   });
 
   final String packId;
+  final String? name;
   final String version;
   final String createdAtUtc;
   final String crs;

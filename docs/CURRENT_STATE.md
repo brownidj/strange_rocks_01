@@ -225,9 +225,148 @@ rg --files "$ROOT_DIR" \
   - debug telemetry
 - Added direct dependency on `pub_semver` for version comparison.
 
+### Tile Pipeline T2 delivered
+- Added parameterized basemap builder for prebuilt MBTiles sources:
+  - `scripts/build/t2_build_parameterized_basemap.sh`
+- Added helper utilities:
+  - `scripts/build/lib/geojson_polygon_info.py` (bbox + area extraction from Polygon/MultiPolygon GeoJSON)
+  - `scripts/build/lib/mbtiles_size_predict.py` (preflight tile/size prediction)
+- Added T2 runbook:
+  - `docs/phase_t2_parameterized_builder_runbook.md`
+- T2 capabilities:
+  - supports arbitrary polygon input (Polygon/MultiPolygon, Feature, or FeatureCollection first feature)
+  - predicts output size before generation
+  - fails with clear messages for:
+    - area limit breaches
+    - size limit breaches
+    - zoom policy breaches
+    - missing license/attribution checks
+
+### Tile Pipeline T3 delivered
+- Added non-interactive CI automation wrapper:
+  - `scripts/build/t3_ci_build_pack.sh`
+- Added artifact checksum manifest generation:
+  - `scripts/build/lib/t3_write_artifact_manifest.py`
+  - outputs `artifact_manifest.json` with per-file SHA256 + bundle hash
+- Added tile output invariant checks:
+  - `scripts/build/t3_assert_tile_invariants.sh`
+  - validates MBTiles schema/tile content + metadata invariants
+- Added regression runner:
+  - `scripts/build/t3_ci_regression.sh`
+  - builds synthetic source MBTiles fixture and executes full T3 pipeline
+- Added CI workflow:
+  - `.github/workflows/tile-pack-ci.yml`
+  - runs T3 regression on push/PR (Ubuntu, sqlite3 + python3)
+- Added T3 docs:
+  - `docs/phase_t3_ci_automation_runbook.md`
+
+### Tile Pipeline T4 delivered
+- Added optional topography layer generation in CI pack builder:
+  - `scripts/build/t3_ci_build_pack.sh`
+  - new optional flags: `--topography-*`
+- Added build/version stamp output:
+  - `build_stamp.json` with `build_timestamp_utc`, `git_sha`, `git_ref`
+  - `metadata.build_stamp` mirrors stamp values
+- Added topography metadata toggles:
+  - `metadata.json` now includes `topography_enabled`
+  - when enabled, `metadata.topography` includes path/provider/license/attribution/zooms/tile_count/size
+- Added topography attribution handling:
+  - writes `licenses/topography_attribution.txt` when topography is enabled
+- Extended invariant checks for topography:
+  - `scripts/build/t3_assert_tile_invariants.sh` validates optional topography file and tile_count consistency
+- Updated regression pipeline to include topography generation:
+  - `scripts/build/t3_ci_regression.sh`
+- Added CI artifact upload/download verification flow:
+  - `.github/workflows/tile-pack-ci.yml`
+  - job 1 computes artifact name using UTC timestamp + short git SHA
+  - job 1 uploads generated pack with retention policy (`retention-days: 14`)
+  - job 2 downloads artifact and re-runs invariant checks
+- Added T4 runbook:
+  - `docs/phase_t4_topography_and_ci_artifacts_runbook.md`
+
+### QSat backend starter delivered
+- Added Queensland QSat source decision matrix:
+  - `docs/queensland_mbtiles_source_matrix.md`
+- Added online app-to-backend build contract for QSat field-pack generation:
+  - `docs/qsat_backend_build_job_contract.md`
+  - includes API request/response/status/failure-code examples and worker command mapping
+- Added QSat ImageServer source builder script:
+  - `scripts/build/build_qsat_from_imageserver.sh`
+  - fetches ArcGIS `exportImage` tiles over bbox + zoom range and writes MBTiles
+  - enforces planned tile cap via `--max-tiles`
+  - writes source metadata (`license`, `attribution`, `source_provider`, `source_url`, `tile_schema_version`)
+  - optional `--build-pack` invokes existing T2 pipeline
+- Added JCU Townsville campus starter polygon fixture:
+  - `scripts/build/fixtures/polygon_jcu_townsville.geojson`
+
+### Local backend endpoints delivered
+- Implemented local HTTP backend for field-pack build jobs:
+  - `scripts/backend/field_pack_backend_server.dart`
+  - `scripts/backend/field_pack_backend_models.dart`
+- Implemented endpoints:
+  - `POST /v1/field-pack-build-jobs`
+  - `GET /v1/field-pack-build-jobs/{job_id}`
+  - `GET /field-packs/{pack_id}/manifest`
+  - `GET /field-packs/{pack_id}/download`
+- Behavior:
+  - `POST` creates a queued job and asynchronously publishes a pack from `FIELD_PACK_SOURCE_ROOT` (defaults to `build/jcu_qsat/field_pack_t3`)
+  - if source pack root is missing, backend now falls back to a synthetic demo pack with a valid SQLite `basemap.mbtiles` tile (decodable image bytes), so tile preview works during integration testing
+  - `GET job` returns `artifact.manifest_url` and `artifact.download_url` when succeeded
+  - manifest output conforms to current app validator (`pack_id/version/area/assets/data_sources/requires_app_version`)
+  - download endpoint returns zip archive bytes for the published pack
+- Backend code split for maintainability and file-size guardrails:
+  - `scripts/backend/field_pack_backend_server.dart`
+  - `scripts/backend/field_pack_backend_models.dart`
+  - `scripts/backend/field_pack_backend_synthetic_pack.dart`
+  - `scripts/backend/field_pack_backend_geojson.dart`
+
+### App wiring update delivered
+- Switched app composition from local stub API to HTTP API client:
+  - `lib/app/app.dart`
+  - now uses `HttpFieldPackApiClient` + `ResumableDownloadService`
+  - backend base URL configurable via:
+    - `--dart-define=FIELD_PACK_BACKEND_BASE_URL=http://127.0.0.1:8080`
+  - defaults to `http://127.0.0.1:8080` when not provided
+- Integrated build-job request/poll flow end-to-end:
+  - `lib/features/field_packs/infrastructure/api/http_request_field_pack_use_case.dart`
+  - `FieldPackController.importAreaAndDownload` now:
+    1) saves local field area
+    2) calls backend `POST /v1/field-pack-build-jobs`
+    3) polls `GET /v1/field-pack-build-jobs/{job_id}` until `succeeded`
+    4) extracts backend `pack_id`
+    5) invokes existing download pipeline using that real `pack_id`
+  - `lib/features/field_packs/presentation/controllers/field_pack_controller.dart`
+  - `lib/app/app.dart` now injects `RequestFieldPackUseCase` implementation
+
+### Minimal tile imagery viewer delivered
+- Added direct MBTiles preview loader:
+  - `lib/features/field_packs/infrastructure/tiles/mbtiles_tile_preview_loader.dart`
+  - reads `basemap.mbtiles` via `sqlite3`, enumerates zooms, and loads decodable `tile_data` blobs
+- Added tile preview screen:
+  - `lib/features/field_packs/presentation/screens/field_pack_tile_preview_screen.dart`
+  - supports:
+    - zoom selector
+    - previous/next tile navigation
+    - tile coordinate display (`zoom`, `tile_column`, `tile_row`)
+    - interactive zoom/pan on tile image
+- Added details-screen entry point:
+  - `lib/features/field_packs/presentation/screens/field_pack_detail_screen.dart`
+  - new `View Tiles` button opens tile preview
+
 ### Tests report
 - `flutter analyze`: pass (no issues).
 - `flutter test`: pass.
+- `bash -n scripts/build/build_qsat_from_imageserver.sh`: pass.
+- `scripts/build/build_qsat_from_imageserver.sh --help`: pass.
+- `dart analyze scripts/backend/field_pack_backend_server.dart scripts/backend/field_pack_backend_models.dart`: pass.
+- `flutter analyze`: pass.
+- `flutter analyze` after controller/job integration: pass.
+- `flutter analyze` after tile preview implementation: pass.
+- Manual smoke test (local backend):
+  - `POST /v1/field-pack-build-jobs` -> `queued`
+  - `GET /v1/field-pack-build-jobs/{job_id}` -> `succeeded` with `manifest_url` + `download_url`
+  - `GET /field-packs/{pack_id}/manifest` -> valid manifest JSON
+  - `GET /field-packs/{pack_id}/download` -> non-zero zip bytes
 - Added tests:
   - `test/field_pack_manifest_validator_test.dart`
   - `test/field_pack_migrations_test.dart`

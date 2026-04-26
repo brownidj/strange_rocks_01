@@ -6,6 +6,7 @@ class FieldPackManifestMapper {
   static Map<String, Object?> toJson(FieldPackManifest manifest) {
     return <String, Object?>{
       'pack_id': manifest.packId,
+      'name': manifest.name,
       'version': manifest.version,
       'created_at_utc': manifest.createdAtUtc,
       'crs': manifest.crs,
@@ -32,6 +33,7 @@ class FieldPackManifestMapper {
 
     return FieldPackManifest(
       packId: json['pack_id'] as String,
+      name: json['name'] as String?,
       version: json['version'] as String,
       createdAtUtc: json['created_at_utc'] as String,
       crs: json['crs'] as String,
