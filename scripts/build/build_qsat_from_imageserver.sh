@@ -15,6 +15,12 @@ Usage:
     [--provider "Queensland Government QSat Mosaic"] \
     [--license "CC BY-SA (verify current terms)"] \
     [--attribution "Contains Queensland Government data. Refer to source licence terms."] \
+    [--image-format "png32"] \
+    [--compression-quality 95] \
+    [--interpolation "RSP_NearestNeighbor"] \
+    [--raster-function "None"] \
+    [--mosaic-where "product_type = 3 AND res_type = 1"] \
+    [--prefer-highest-res] \
     [--name "QSat Townsville Source"] \
     [--build-pack]
 
@@ -51,6 +57,12 @@ LICENSE_VALUE="CC BY-SA (verify current terms)"
 ATTRIBUTION_VALUE="Contains Queensland Government data. Refer to source licence terms."
 NAME_VALUE="QSat Source"
 BUILD_PACK="false"
+IMAGE_FORMAT="png32"
+COMPRESSION_QUALITY="95"
+INTERPOLATION="RSP_NearestNeighbor"
+RASTER_FUNCTION="None"
+MOSAIC_WHERE=""
+PREFER_HIGHEST_RES="false"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -64,6 +76,12 @@ while [[ $# -gt 0 ]]; do
     --provider) PROVIDER="${2:-}"; shift 2 ;;
     --license) LICENSE_VALUE="${2:-}"; shift 2 ;;
     --attribution) ATTRIBUTION_VALUE="${2:-}"; shift 2 ;;
+    --image-format) IMAGE_FORMAT="${2:-}"; shift 2 ;;
+    --compression-quality) COMPRESSION_QUALITY="${2:-}"; shift 2 ;;
+    --interpolation) INTERPOLATION="${2:-}"; shift 2 ;;
+    --raster-function) RASTER_FUNCTION="${2:-}"; shift 2 ;;
+    --mosaic-where) MOSAIC_WHERE="${2:-}"; shift 2 ;;
+    --prefer-highest-res) PREFER_HIGHEST_RES="true"; shift ;;
     --name) NAME_VALUE="${2:-}"; shift 2 ;;
     --build-pack) BUILD_PACK="true"; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -82,6 +100,25 @@ fi
 if (( MIN_ZOOM > MAX_ZOOM )); then
   echo "--min-zoom must be <= --max-zoom" >&2
   exit 1
+fi
+if [[ ! "$IMAGE_FORMAT" =~ ^(png|png8|png24|png32|jpg|jpgpng)$ ]]; then
+  echo "--image-format must be one of: png,png8,png24,png32,jpg,jpgpng" >&2
+  exit 1
+fi
+if ! [[ "$COMPRESSION_QUALITY" =~ ^[0-9]+$ ]] || (( COMPRESSION_QUALITY < 0 || COMPRESSION_QUALITY > 100 )); then
+  echo "--compression-quality must be an integer in [0,100]" >&2
+  exit 1
+fi
+if [[ ! "$INTERPOLATION" =~ ^(RSP_NearestNeighbor|RSP_BilinearInterpolation|RSP_CubicConvolution)$ ]]; then
+  echo "--interpolation must be one of: RSP_NearestNeighbor,RSP_BilinearInterpolation,RSP_CubicConvolution" >&2
+  exit 1
+fi
+if [[ ! "$RASTER_FUNCTION" =~ ^(None|Hillshade|Aspect|Slope_degrees|Slope_percent_rise)$ ]]; then
+  echo "--raster-function must be one of: None,Hillshade,Aspect,Slope_degrees,Slope_percent_rise" >&2
+  exit 1
+fi
+if (( MAX_ZOOM > 16 )); then
+  echo "Warning: max zoom $MAX_ZOOM exceeds native QSat detail (~z16), so higher zooms may appear soft." >&2
 fi
 
 require_cmd curl
@@ -194,7 +231,42 @@ INDEX=0
 while IFS=',' read -r Z X Y_XYZ Y_TMS MINX MINY MAXX MAXY; do
   INDEX=$((INDEX + 1))
   TILE_FILE="$TMP_DIR/tile_${Z}_${X}_${Y_XYZ}.img"
-  URL="${IMAGESERVER_URL%/}/exportImage?bbox=${MINX},${MINY},${MAXX},${MAXY}&bboxSR=3857&imageSR=3857&size=256,256&format=jpgpng&f=image"
+  URL="${IMAGESERVER_URL%/}/exportImage?bbox=${MINX},${MINY},${MAXX},${MAXY}&bboxSR=3857&imageSR=3857&size=256,256&format=${IMAGE_FORMAT}&compressionQuality=${COMPRESSION_QUALITY}&interpolation=${INTERPOLATION}&f=image"
+  if [[ -n "$MOSAIC_WHERE" || "$PREFER_HIGHEST_RES" == "true" ]]; then
+    MOSAIC_RULE_ENCODED="$(python3 - "$MOSAIC_WHERE" "$PREFER_HIGHEST_RES" <<'PY'
+import json
+import sys
+import urllib.parse
+
+where = sys.argv[1].strip()
+prefer_high = sys.argv[2].lower() == "true"
+
+rule = {}
+if prefer_high:
+    rule["mosaicMethod"] = "esriMosaicAttribute"
+    rule["sortField"] = "res_value"
+    rule["ascending"] = True
+if where:
+    rule["where"] = where
+
+print(urllib.parse.quote(json.dumps(rule, separators=(",", ":"))))
+PY
+)"
+    URL="${URL}&mosaicRule=${MOSAIC_RULE_ENCODED}"
+  fi
+  if [[ "$RASTER_FUNCTION" != "None" ]]; then
+    RENDERING_RULE_ENCODED="$(python3 - "$RASTER_FUNCTION" <<'PY'
+import json
+import sys
+import urllib.parse
+
+name = sys.argv[1]
+rule = {"rasterFunction": name}
+print(urllib.parse.quote(json.dumps(rule, separators=(",", ":"))))
+PY
+)"
+    URL="${URL}&renderingRule=${RENDERING_RULE_ENCODED}"
+  fi
 
   curl --fail --silent --show-error --location \
     --retry 2 --retry-all-errors --connect-timeout 20 --max-time 120 \
@@ -219,12 +291,16 @@ sqlite3 "$SOURCE_MBTILES" <<SQL
 INSERT INTO metadata(name,value) VALUES
   ('name', '$NAME_VALUE'),
   ('type', 'baselayer'),
-  ('format', 'jpgpng'),
+  ('format', '$IMAGE_FORMAT'),
   ('bounds', '$BBOX'),
   ('minzoom', '$MIN_ZOOM'),
   ('maxzoom', '$MAX_ZOOM'),
   ('source_provider', '$PROVIDER'),
   ('source_url', '$SOURCE_URL'),
+  ('resampling', '$INTERPOLATION'),
+  ('raster_function', '$RASTER_FUNCTION'),
+  ('mosaic_where', '$MOSAIC_WHERE'),
+  ('prefer_highest_res', '$PREFER_HIGHEST_RES'),
   ('license', '$LICENSE_VALUE'),
   ('attribution', '$ATTRIBUTION_VALUE'),
   ('generated_at_utc', '$GENERATED_AT'),

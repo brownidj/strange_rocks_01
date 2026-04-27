@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:strange_rocks_01/features/field_packs/domain/entities/field_area.dart';
 import 'package:strange_rocks_01/features/field_packs/presentation/controllers/field_pack_controller.dart';
 
 class FieldAreaDefineScreen extends StatefulWidget {
@@ -16,6 +17,7 @@ class _FieldAreaDefineScreenState extends State<FieldAreaDefineScreen> {
   final _geoJsonController = TextEditingController(
     text: '{"type":"FeatureCollection","features":[]}',
   );
+  FieldImagerySource _imagerySource = FieldImagerySource.qimageryAerial;
 
   @override
   void dispose() {
@@ -32,6 +34,7 @@ class _FieldAreaDefineScreenState extends State<FieldAreaDefineScreen> {
     await widget.controller.importAreaAndDownload(
       areaName: _nameController.text.trim(),
       geoJsonRaw: _geoJsonController.text.trim(),
+      imagerySource: _imagerySource,
     );
 
     if (!mounted) {
@@ -74,6 +77,34 @@ class _FieldAreaDefineScreenState extends State<FieldAreaDefineScreen> {
                           return 'Area name is required';
                         }
                         return null;
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<FieldImagerySource>(
+                      initialValue: _imagerySource,
+                      decoration: const InputDecoration(
+                        labelText: 'Imagery Source',
+                        border: OutlineInputBorder(),
+                      ),
+                      items: const [
+                        DropdownMenuItem(
+                          value: FieldImagerySource.qsat,
+                          child: Text('QSat Mosaic'),
+                        ),
+                        DropdownMenuItem(
+                          value: FieldImagerySource.qimageryAerial,
+                          child: Text('QImagery Aerial (default)'),
+                        ),
+                        DropdownMenuItem(
+                          value: FieldImagerySource.topographicHillshade,
+                          child: Text('Topographic / Hillshade'),
+                        ),
+                      ],
+                      onChanged: (value) {
+                        if (value == null) return;
+                        setState(() {
+                          _imagerySource = value;
+                        });
                       },
                     ),
                     const SizedBox(height: 12),

@@ -4,9 +4,22 @@ import 'dart:typed_data';
 import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart';
 
+enum TileStepDirection {
+  north,
+  south,
+  east,
+  west,
+  northeast,
+  northwest,
+  southeast,
+  southwest,
+}
+
 class MbtilesTilePreview {
   const MbtilesTilePreview({
     required this.bytes,
+    required this.labelsBytes,
+    required this.topographyBytes,
     required this.zoom,
     required this.tileColumn,
     required this.tileRow,
@@ -19,9 +32,15 @@ class MbtilesTilePreview {
     required this.tileHeaderHex,
     required this.metadataFormat,
     required this.detectedTileKind,
+    required this.labelsAvailable,
+    required this.topographyAvailable,
+    required this.previousDirection,
+    required this.nextDirection,
   });
 
   final Uint8List bytes;
+  final Uint8List? labelsBytes;
+  final Uint8List? topographyBytes;
   final int zoom;
   final int tileColumn;
   final int tileRow;
@@ -34,6 +53,10 @@ class MbtilesTilePreview {
   final String tileHeaderHex;
   final String? metadataFormat;
   final String detectedTileKind;
+  final bool labelsAvailable;
+  final bool topographyAvailable;
+  final TileStepDirection? previousDirection;
+  final TileStepDirection? nextDirection;
 }
 
 class MbtilesTilePreviewLoader {
@@ -92,6 +115,30 @@ LIMIT 1 OFFSET ?;
 ''',
         [effectiveZoom, boundedIndex],
       ).first;
+      final previous = boundedIndex > 0
+          ? db.select(
+              '''
+SELECT tile_column, tile_row
+FROM tiles
+WHERE zoom_level = ?
+ORDER BY tile_column, tile_row
+LIMIT 1 OFFSET ?;
+''',
+              [effectiveZoom, boundedIndex - 1],
+            ).first
+          : null;
+      final next = boundedIndex < totalInZoom - 1
+          ? db.select(
+              '''
+SELECT tile_column, tile_row
+FROM tiles
+WHERE zoom_level = ?
+ORDER BY tile_column, tile_row
+LIMIT 1 OFFSET ?;
+''',
+              [effectiveZoom, boundedIndex + 1],
+            ).first
+          : null;
       final metadataFormatRow = db.select(
         "SELECT value FROM metadata WHERE name = 'format' LIMIT 1;",
       );
@@ -99,9 +146,25 @@ LIMIT 1 OFFSET ?;
           ? null
           : metadataFormatRow.first['value'] as String?;
       final normalized = _normalizeTileBytes(row['tile_data']);
+      final labelsDbPath = p.join(packRootPath, 'labels.mbtiles');
+      final topographyDbPath = p.join(packRootPath, 'topography.mbtiles');
+      final labelsBytes = _loadOverlayTile(
+        overlayDbPath: labelsDbPath,
+        zoom: effectiveZoom,
+        tileColumn: row['tile_column'] as int,
+        tileRow: row['tile_row'] as int,
+      );
+      final topographyBytes = _loadOverlayTile(
+        overlayDbPath: topographyDbPath,
+        zoom: effectiveZoom,
+        tileColumn: row['tile_column'] as int,
+        tileRow: row['tile_row'] as int,
+      );
 
       return MbtilesTilePreview(
         bytes: normalized.bytes,
+        labelsBytes: labelsBytes,
+        topographyBytes: topographyBytes,
         zoom: effectiveZoom,
         tileColumn: row['tile_column'] as int,
         tileRow: row['tile_row'] as int,
@@ -114,7 +177,53 @@ LIMIT 1 OFFSET ?;
         tileHeaderHex: _headerHex(normalized.bytes, maxBytes: 16),
         metadataFormat: metadataFormat,
         detectedTileKind: _detectTileKind(normalized.bytes),
+        labelsAvailable: File(labelsDbPath).existsSync(),
+        topographyAvailable: File(topographyDbPath).existsSync(),
+        previousDirection: previous == null
+            ? null
+            : _directionFromDelta(
+                deltaCol: (previous['tile_column'] as int) -
+                    (row['tile_column'] as int),
+                deltaRow: (previous['tile_row'] as int) - (row['tile_row'] as int),
+              ),
+        nextDirection: next == null
+            ? null
+            : _directionFromDelta(
+                deltaCol: (next['tile_column'] as int) - (row['tile_column'] as int),
+                deltaRow: (next['tile_row'] as int) - (row['tile_row'] as int),
+              ),
       );
+    } finally {
+      db.dispose();
+    }
+  }
+
+  Uint8List? _loadOverlayTile({
+    required String overlayDbPath,
+    required int zoom,
+    required int tileColumn,
+    required int tileRow,
+  }) {
+    final file = File(overlayDbPath);
+    if (!file.existsSync()) {
+      return null;
+    }
+    final db = sqlite3.open(overlayDbPath);
+    try {
+      final rows = db.select(
+        '''
+SELECT tile_data
+FROM tiles
+WHERE zoom_level = ? AND tile_column = ? AND tile_row = ?
+LIMIT 1;
+''',
+        <Object?>[zoom, tileColumn, tileRow],
+      );
+      if (rows.isEmpty) {
+        return null;
+      }
+      final normalized = _normalizeTileBytes(rows.first['tile_data']);
+      return normalized.bytes;
     } finally {
       db.dispose();
     }
@@ -187,6 +296,40 @@ LIMIT 1 OFFSET ?;
       return 'zlib-or-deflate';
     }
     return 'unknown';
+  }
+
+  TileStepDirection? _directionFromDelta({
+    required int deltaCol,
+    required int deltaRow,
+  }) {
+    if (deltaCol == 0 && deltaRow == 0) {
+      return null;
+    }
+    if (deltaCol == 0 && deltaRow > 0) {
+      return TileStepDirection.north;
+    }
+    if (deltaCol == 0 && deltaRow < 0) {
+      return TileStepDirection.south;
+    }
+    if (deltaCol > 0 && deltaRow == 0) {
+      return TileStepDirection.east;
+    }
+    if (deltaCol < 0 && deltaRow == 0) {
+      return TileStepDirection.west;
+    }
+    if (deltaCol > 0 && deltaRow > 0) {
+      return TileStepDirection.northeast;
+    }
+    if (deltaCol < 0 && deltaRow > 0) {
+      return TileStepDirection.northwest;
+    }
+    if (deltaCol > 0 && deltaRow < 0) {
+      return TileStepDirection.southeast;
+    }
+    if (deltaCol < 0 && deltaRow < 0) {
+      return TileStepDirection.southwest;
+    }
+    return null;
   }
 }
 

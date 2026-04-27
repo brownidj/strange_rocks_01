@@ -36,6 +36,7 @@ class FieldPackController extends ChangeNotifier {
   Future<void> importAreaAndDownload({
     required String areaName,
     required String geoJsonRaw,
+    FieldImagerySource imagerySource = FieldImagerySource.qsat,
   }) async {
     await _runGuarded(() async {
       final geoJson = jsonDecode(geoJsonRaw);
@@ -50,6 +51,7 @@ class FieldPackController extends ChangeNotifier {
         name: areaName,
         geoJson: geoJson,
         bbox: _extractBoundingBox(geoJson),
+        imagerySource: imagerySource,
       );
 
       await _repository.saveFieldArea(area);

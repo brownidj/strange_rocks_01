@@ -20,25 +20,80 @@ class HttpRequestFieldPackUseCase implements RequestFieldPackUseCase {
 
   @override
   Future<String> call(FieldArea area) async {
-    final requestBody = <String, Object?>{
-      'name': '${area.name} QSat',
-      'field_area': <String, Object?>{
-        'name': area.name,
-        'geojson': area.geoJson,
-      },
-      'tile_build': <String, Object?>{
-        'source_preset': 'qld_qsat_wos_latestsatellite_allusers',
+    final sourcePreset = switch (area.imagerySource) {
+      FieldImagerySource.qsat => 'qld_qsat_wos_latestsatellite_allusers',
+      FieldImagerySource.qimageryAerial => 'qld_qimagery_aerial',
+      FieldImagerySource.topographicHillshade => 'qld_topographic_hillshade',
+    };
+    final provider = switch (area.imagerySource) {
+      FieldImagerySource.qsat => 'Queensland Government QSat Mosaic',
+      FieldImagerySource.qimageryAerial => 'Queensland Government QImagery Aerial',
+      FieldImagerySource.topographicHillshade => 'Queensland Government Topographic/Hillshade',
+    };
+    final license = switch (area.imagerySource) {
+      FieldImagerySource.qsat => 'CC BY-SA (verify current terms)',
+      FieldImagerySource.qimageryAerial =>
+        'Per-dataset licence (verify current terms before redistribution)',
+      FieldImagerySource.topographicHillshade =>
+        'Queensland Government elevation/topography terms (verify current terms)',
+    };
+    final attribution = switch (area.imagerySource) {
+      FieldImagerySource.qsat =>
+        'Contains Queensland Government data. Refer to source licence terms.',
+      FieldImagerySource.qimageryAerial =>
+        'Contains Queensland Government aerial imagery. Refer to source licence terms.',
+      FieldImagerySource.topographicHillshade =>
+        'Contains Queensland Government elevation/topographic data. Refer to source licence terms.',
+    };
+    final sourceLabel = switch (area.imagerySource) {
+      FieldImagerySource.qsat => 'QSat',
+      FieldImagerySource.qimageryAerial => 'QImagery',
+      FieldImagerySource.topographicHillshade => 'Topography',
+    };
+    final tileBuild = switch (area.imagerySource) {
+      FieldImagerySource.qsat => <String, Object?>{
+        'source_preset': sourcePreset,
         'min_zoom': 10,
         'max_zoom': 17,
         'max_area_km2': 50,
         'max_size_mb': 500,
         'max_tiles': 6000,
       },
+      FieldImagerySource.qimageryAerial => <String, Object?>{
+        'source_preset': sourcePreset,
+        'min_zoom': 16,
+        'max_zoom': 19,
+        'max_area_km2': 50,
+        'max_size_mb': 1500,
+        'max_tiles': 20000,
+        'image_format': 'png32',
+        'compression_quality': 95,
+        'interpolation': 'RSP_NearestNeighbor',
+        'mosaic_where': 'product_type = 3 AND res_type = 1 AND res_value <= 10',
+        'prefer_highest_res': true,
+      },
+      FieldImagerySource.topographicHillshade => <String, Object?>{
+        'source_preset': sourcePreset,
+        'min_zoom': 10,
+        'max_zoom': 17,
+        'max_area_km2': 50,
+        'max_size_mb': 500,
+        'max_tiles': 6000,
+        'raster_function': 'Hillshade',
+      },
+    };
+
+    final requestBody = <String, Object?>{
+      'name': '${area.name} $sourceLabel',
+      'field_area': <String, Object?>{
+        'name': area.name,
+        'geojson': area.geoJson,
+      },
+      'tile_build': tileBuild,
       'metadata': <String, Object?>{
-        'provider': 'Queensland Government QSat Mosaic',
-        'license': 'CC BY-SA (verify current terms)',
-        'attribution':
-            'Contains Queensland Government data. Refer to source licence terms.',
+        'provider': provider,
+        'license': license,
+        'attribution': attribution,
       },
     };
 

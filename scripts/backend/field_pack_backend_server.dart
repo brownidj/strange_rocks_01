@@ -15,41 +15,107 @@ import 'field_pack_backend_synthetic_pack.dart';
 Future<void> main() async {
   final host = InternetAddress.loopbackIPv4;
   final port = int.tryParse(Platform.environment['FIELD_PACK_BACKEND_PORT'] ?? '') ?? 8080;
-  final sourcePackRoot =
-      Platform.environment['FIELD_PACK_SOURCE_ROOT'] ??
-      _defaultSourcePackRootFromScript();
-  final service = _FieldPackBackendService(sourcePackRoot: sourcePackRoot);
+  final sourceRoots = _defaultSourcePackRootsFromScript();
+  final sourcePackRootDefault =
+      Platform.environment['FIELD_PACK_SOURCE_ROOT'] ?? sourceRoots.defaultRoot;
+  final sourcePackRootQsat =
+      Platform.environment['FIELD_PACK_SOURCE_ROOT_QSAT'] ?? sourceRoots.qsatRoot;
+  final sourcePackRootQimagery =
+      Platform.environment['FIELD_PACK_SOURCE_ROOT_QIMAGERY'] ??
+      sourceRoots.qimageryRoot;
+  final sourcePackRootTopography =
+      Platform.environment['FIELD_PACK_SOURCE_ROOT_TOPO'] ??
+      sourceRoots.topographyRoot;
+  final service = _FieldPackBackendService(
+    sourcePackRootDefault: sourcePackRootDefault,
+    sourcePackRootQsat: sourcePackRootQsat,
+    sourcePackRootQimagery: sourcePackRootQimagery,
+    sourcePackRootTopography: sourcePackRootTopography,
+  );
   final server = await HttpServer.bind(host, port);
   stdout.writeln('Field-pack backend listening on http://${host.address}:$port');
-  stdout.writeln('Source pack root: $sourcePackRoot');
+  stdout.writeln('Source pack roots:');
+  stdout.writeln('  default: $sourcePackRootDefault');
+  stdout.writeln('  qsat:    $sourcePackRootQsat');
+  stdout.writeln('  qimagery:$sourcePackRootQimagery');
+  stdout.writeln('  topo:    $sourcePackRootTopography');
   await for (final request in server) {
     await service.handle(request, baseUrl: Uri.parse('http://${host.address}:$port'));
   }
 }
 
-String _defaultSourcePackRootFromScript() {
+({String defaultRoot, String qsatRoot, String qimageryRoot, String topographyRoot})
+_defaultSourcePackRootsFromScript() {
   final scriptDir = Directory.fromUri(Platform.script).parent.path;
-  final candidates = <String>[
+  final qsatCandidates = <String>[
     p.normalize(p.join(scriptDir, '..', '..', 'build', 'jcu_qsat', 'field_pack')),
     p.normalize(p.join(scriptDir, '..', '..', 'build', 'jcu_qsat', 'field_pack_t3')),
     p.normalize(p.join(scriptDir, '..', '..', 'build', 'jcu_qsat', 'field_pack_t4')),
   ];
-  for (final candidate in candidates) {
-    if (Directory(candidate).existsSync()) {
-      return candidate;
+  final qimageryCandidates = <String>[
+    p.normalize(p.join(scriptDir, '..', '..', 'build', 'jcu_qimagery', 'field_pack')),
+    p.normalize(p.join(scriptDir, '..', '..', 'build', 'jcu_qimagery', 'field_pack_t3')),
+    p.normalize(p.join(scriptDir, '..', '..', 'build', 'qimagery', 'field_pack')),
+  ];
+  final topoCandidates = <String>[
+    p.normalize(p.join(scriptDir, '..', '..', 'build', 'jcu_topography', 'field_pack')),
+    p.normalize(p.join(scriptDir, '..', '..', 'build', 'jcu_qtopo', 'field_pack')),
+    p.normalize(p.join(scriptDir, '..', '..', 'build', 'topography', 'field_pack')),
+  ];
+
+  String pick(List<String> candidates) {
+    for (final candidate in candidates) {
+      if (Directory(candidate).existsSync()) {
+        return candidate;
+      }
     }
+    return candidates.first;
   }
-  return candidates.first;
+
+  return (
+    defaultRoot: pick(qsatCandidates),
+    qsatRoot: pick(qsatCandidates),
+    qimageryRoot: pick(qimageryCandidates),
+    topographyRoot: pick(topoCandidates),
+  );
 }
 
 class _FieldPackBackendService {
-  _FieldPackBackendService({required this.sourcePackRoot});
+  _FieldPackBackendService({
+    required this.sourcePackRootDefault,
+    required this.sourcePackRootQsat,
+    required this.sourcePackRootQimagery,
+    required this.sourcePackRootTopography,
+  });
 
-  final String sourcePackRoot;
+  final String sourcePackRootDefault;
+  final String sourcePackRootQsat;
+  final String sourcePackRootQimagery;
+  final String sourcePackRootTopography;
   final Map<String, BuildJob> _jobs = <String, BuildJob>{};
   final Map<String, PublishedPack> _packs = <String, PublishedPack>{};
   final Random _random = Random.secure();
   final _syntheticFactory = const FieldPackBackendSyntheticPackFactory();
+
+  ({String preset, String rootPath}) _resolveSourceRoot(
+    Map<String, Object?> payload,
+  ) {
+    final tileBuild =
+        (payload['tile_build'] as Map<String, Object?>?) ??
+        const <String, Object?>{};
+    final presetRaw = (tileBuild['source_preset'] as String?)?.trim();
+    final preset = (presetRaw == null || presetRaw.isEmpty)
+        ? 'qld_qsat_wos_latestsatellite_allusers'
+        : presetRaw;
+
+    final rootPath = switch (preset) {
+      'qld_qsat_wos_latestsatellite_allusers' => sourcePackRootQsat,
+      'qld_qimagery_aerial' => sourcePackRootQimagery,
+      'qld_topographic_hillshade' => sourcePackRootTopography,
+      _ => sourcePackRootDefault,
+    };
+    return (preset: preset, rootPath: rootPath);
+  }
 
   Future<void> handle(HttpRequest request, {required Uri baseUrl}) async {
     try {
@@ -139,13 +205,29 @@ class _FieldPackBackendService {
   }
 
   Future<PublishedPack> _publishPack(Map<String, Object?> payload) async {
-    final root = Directory(sourcePackRoot);
-    if (!root.existsSync()) {
-      return _syntheticFactory.build(
-        packId: _nextId('pack'),
-        payload: payload,
-        isoUtc: _iso,
-      );
+    final resolved = _resolveSourceRoot(payload);
+    Directory root = Directory(resolved.rootPath);
+    bool validRoot(Directory d) =>
+        d.existsSync() && File(p.join(d.path, 'basemap.mbtiles')).existsSync();
+
+    if (!validRoot(root)) {
+      final fallback = Directory(sourcePackRootDefault);
+      if (validRoot(fallback)) {
+        stderr.writeln(
+          'Source pack fallback: preset=${resolved.preset} requested=${resolved.rootPath} '
+          'missing/invalid, using default=${fallback.path}',
+        );
+        root = fallback;
+      } else {
+        stderr.writeln(
+          'Source pack missing for preset=${resolved.preset}; falling back to synthetic pack.',
+        );
+        return _syntheticFactory.build(
+          packId: _nextId('pack'),
+          payload: payload,
+          isoUtc: _iso,
+        );
+      }
     }
     final packId = _nextId('pack');
     final zipBytes = await _zipDirectory(root);
@@ -164,7 +246,13 @@ class _FieldPackBackendService {
   }) async {
     final now = DateTime.now().toUtc();
     final assets = <Map<String, Object?>>[];
-    for (final path in <String>['basemap.mbtiles', 'topography.mbtiles', 'geology.gpkg', 'gazetteer.sqlite']) {
+    for (final path in <String>[
+      'basemap.mbtiles',
+      'labels.mbtiles',
+      'topography.mbtiles',
+      'geology.gpkg',
+      'gazetteer.sqlite',
+    ]) {
       final file = File(p.join(sourceRoot.path, path));
       if (!file.existsSync()) continue;
       final bytes = await file.readAsBytes();
@@ -182,6 +270,8 @@ class _FieldPackBackendService {
     final bbox = extractBboxFromGeoJson(geojson) ??
         <double>[146.7406, -19.3379, 146.7798, -19.3078];
     final metadata = (payload['metadata'] as Map<String, Object?>?) ?? const <String, Object?>{};
+    final tileBuild = (payload['tile_build'] as Map<String, Object?>?) ?? const <String, Object?>{};
+    final sourcePreset = tileBuild['source_preset'] as String?;
     final requestName = payload['name'] as String?;
     final areaName = fieldArea['name'] as String?;
     final displayName = areaName?.trim().isNotEmpty == true
@@ -206,6 +296,8 @@ class _FieldPackBackendService {
       'data_sources': <Object>[
         <String, Object?>{
           'provider': provider,
+          if (sourcePreset != null && sourcePreset.isNotEmpty)
+            'source_preset': sourcePreset,
           'acquired_at_utc': _iso(now),
           'license': license,
           'attribution': attribution,
