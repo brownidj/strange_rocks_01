@@ -15,6 +15,34 @@ enum TileStepDirection {
   southwest,
 }
 
+class TileCoordinate {
+  const TileCoordinate({
+    required this.zoom,
+    required this.tileColumn,
+    required this.tileRow,
+  });
+
+  final int zoom;
+  final int tileColumn;
+  final int tileRow;
+}
+
+class TileBounds {
+  const TileBounds({
+    required this.minColumn,
+    required this.maxColumn,
+    required this.minRow,
+    required this.maxRow,
+    required this.count,
+  });
+
+  final int minColumn;
+  final int maxColumn;
+  final int minRow;
+  final int maxRow;
+  final int count;
+}
+
 class MbtilesTilePreview {
   const MbtilesTilePreview({
     required this.bytes,
@@ -61,6 +89,229 @@ class MbtilesTilePreview {
 
 class MbtilesTilePreviewLoader {
   const MbtilesTilePreviewLoader();
+
+  List<int> availableZooms({required String packRootPath}) {
+    final dbPath = p.join(packRootPath, 'basemap.mbtiles');
+    final dbFile = File(dbPath);
+    if (!dbFile.existsSync()) {
+      throw StateError('basemap.mbtiles not found at $dbPath');
+    }
+    final db = sqlite3.open(dbPath);
+    try {
+      return db
+          .select(
+            'SELECT DISTINCT zoom_level FROM tiles ORDER BY zoom_level ASC;',
+          )
+          .map((r) => r['zoom_level'] as int)
+          .toList(growable: false);
+    } finally {
+      db.dispose();
+    }
+  }
+
+  TileBounds? boundsForZoom({
+    required String packRootPath,
+    required int zoom,
+    TileBounds? within,
+  }) {
+    final dbPath = p.join(packRootPath, 'basemap.mbtiles');
+    final dbFile = File(dbPath);
+    if (!dbFile.existsSync()) {
+      throw StateError('basemap.mbtiles not found at $dbPath');
+    }
+    final db = sqlite3.open(dbPath);
+    try {
+      final where = within == null
+          ? 'zoom_level = ?'
+          : '''
+zoom_level = ?
+AND tile_column BETWEEN ? AND ?
+AND tile_row BETWEEN ? AND ?
+''';
+      final args = within == null
+          ? <Object?>[zoom]
+          : <Object?>[
+              zoom,
+              within.minColumn,
+              within.maxColumn,
+              within.minRow,
+              within.maxRow,
+            ];
+      final rows = db.select(
+        '''
+SELECT
+  MIN(tile_column) AS min_column,
+  MAX(tile_column) AS max_column,
+  MIN(tile_row) AS min_row,
+  MAX(tile_row) AS max_row,
+  COUNT(*) AS c
+FROM tiles
+WHERE $where;
+''',
+        args,
+      );
+      if (rows.isEmpty) {
+        return null;
+      }
+      final row = rows.first;
+      final count = row['c'] as int;
+      if (count <= 0) {
+        return null;
+      }
+      return TileBounds(
+        minColumn: row['min_column'] as int,
+        maxColumn: row['max_column'] as int,
+        minRow: row['min_row'] as int,
+        maxRow: row['max_row'] as int,
+        count: count,
+      );
+    } finally {
+      db.dispose();
+    }
+  }
+
+  TileCoordinate? firstTileInBounds({
+    required String packRootPath,
+    required int zoom,
+    required TileBounds bounds,
+  }) {
+    final dbPath = p.join(packRootPath, 'basemap.mbtiles');
+    final dbFile = File(dbPath);
+    if (!dbFile.existsSync()) {
+      throw StateError('basemap.mbtiles not found at $dbPath');
+    }
+    final db = sqlite3.open(dbPath);
+    try {
+      final rows = db.select(
+        '''
+SELECT tile_column, tile_row
+FROM tiles
+WHERE zoom_level = ?
+  AND tile_column BETWEEN ? AND ?
+  AND tile_row BETWEEN ? AND ?
+ORDER BY tile_column, tile_row
+LIMIT 1;
+''',
+        <Object?>[
+          zoom,
+          bounds.minColumn,
+          bounds.maxColumn,
+          bounds.minRow,
+          bounds.maxRow,
+        ],
+      );
+      if (rows.isEmpty) {
+        return null;
+      }
+      return TileCoordinate(
+        zoom: zoom,
+        tileColumn: rows.first['tile_column'] as int,
+        tileRow: rows.first['tile_row'] as int,
+      );
+    } finally {
+      db.dispose();
+    }
+  }
+
+  MbtilesTilePreview loadByTile({
+    required String packRootPath,
+    required int zoom,
+    required int tileColumn,
+    required int tileRow,
+  }) {
+    final dbPath = p.join(packRootPath, 'basemap.mbtiles');
+    final dbFile = File(dbPath);
+    if (!dbFile.existsSync()) {
+      throw StateError('basemap.mbtiles not found at $dbPath');
+    }
+    final dbSizeBytes = dbFile.lengthSync();
+    final db = sqlite3.open(dbPath);
+    try {
+      final totalTiles =
+          db.select('SELECT COUNT(*) AS c FROM tiles;').first['c'] as int;
+      if (totalTiles <= 0) {
+        throw StateError('No tiles found in basemap.mbtiles');
+      }
+      final availableZooms = db
+          .select(
+            'SELECT DISTINCT zoom_level FROM tiles ORDER BY zoom_level ASC;',
+          )
+          .map((r) => r['zoom_level'] as int)
+          .toList(growable: false);
+      if (availableZooms.isEmpty) {
+        throw StateError('No zoom levels found in basemap.mbtiles');
+      }
+      final rows = db.select(
+        '''
+SELECT tile_data
+FROM tiles
+WHERE zoom_level = ? AND tile_column = ? AND tile_row = ?
+LIMIT 1;
+''',
+        <Object?>[zoom, tileColumn, tileRow],
+      );
+      if (rows.isEmpty) {
+        throw StateError('Tile not found for z=$zoom x=$tileColumn y=$tileRow');
+      }
+      final normalized = _normalizeTileBytes(rows.first['tile_data']);
+      final metadataFormatRow = db.select(
+        "SELECT value FROM metadata WHERE name = 'format' LIMIT 1;",
+      );
+      final metadataFormat = metadataFormatRow.isEmpty
+          ? null
+          : metadataFormatRow.first['value'] as String?;
+      final totalInZoom = (db.select(
+        'SELECT COUNT(*) AS c FROM tiles WHERE zoom_level = ?;',
+        [zoom],
+      ).first['c'] as int);
+      final beforeInZoom = (db.select(
+        '''
+SELECT COUNT(*) AS c
+FROM tiles
+WHERE zoom_level = ?
+  AND (tile_column < ? OR (tile_column = ? AND tile_row < ?));
+''',
+        <Object?>[zoom, tileColumn, tileColumn, tileRow],
+      ).first['c'] as int);
+      final labelsDbPath = p.join(packRootPath, 'labels.mbtiles');
+      final topographyDbPath = p.join(packRootPath, 'topography.mbtiles');
+      final labelsBytes = _loadOverlayTile(
+        overlayDbPath: labelsDbPath,
+        zoom: zoom,
+        tileColumn: tileColumn,
+        tileRow: tileRow,
+      );
+      final topographyBytes = _loadOverlayTile(
+        overlayDbPath: topographyDbPath,
+        zoom: zoom,
+        tileColumn: tileColumn,
+        tileRow: tileRow,
+      );
+      return MbtilesTilePreview(
+        bytes: normalized.bytes,
+        labelsBytes: labelsBytes,
+        topographyBytes: topographyBytes,
+        zoom: zoom,
+        tileColumn: tileColumn,
+        tileRow: tileRow,
+        indexInZoom: beforeInZoom,
+        totalInZoom: totalInZoom,
+        totalTiles: totalTiles,
+        availableZooms: availableZooms,
+        dbPath: dbPath,
+        dbSizeBytes: dbSizeBytes,
+        tileHeaderHex: _headerHex(normalized.bytes, maxBytes: 16),
+        metadataFormat: metadataFormat,
+        detectedTileKind: _detectTileKind(normalized.bytes),
+        labelsAvailable: File(labelsDbPath).existsSync(),
+        topographyAvailable: File(topographyDbPath).existsSync(),
+        previousDirection: null,
+        nextDirection: null,
+      );
+    } finally {
+      db.dispose();
+    }
+  }
 
   MbtilesTilePreview load({
     required String packRootPath,

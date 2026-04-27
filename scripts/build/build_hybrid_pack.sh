@@ -7,7 +7,7 @@ Usage:
   scripts/build/build_hybrid_pack.sh \
     --polygon /path/to/area.geojson \
     [--output-root build/jcu_hybrid] \
-    [--min-zoom 10] \
+    [--min-zoom 9] \
     [--max-zoom 17] \
     [--max-tiles 12000]
 
@@ -35,7 +35,7 @@ T3_SCRIPT="$SCRIPT_DIR/t3_ci_build_pack.sh"
 
 POLYGON=""
 OUTPUT_ROOT="build/jcu_hybrid"
-MIN_ZOOM="10"
+MIN_ZOOM="9"
 MAX_ZOOM="17"
 MAX_TILES="12000"
 

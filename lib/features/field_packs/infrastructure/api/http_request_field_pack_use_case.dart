@@ -61,8 +61,8 @@ class HttpRequestFieldPackUseCase implements RequestFieldPackUseCase {
       },
       FieldImagerySource.qimageryAerial => <String, Object?>{
         'source_preset': sourcePreset,
-        'min_zoom': 16,
-        'max_zoom': 19,
+        'min_zoom': 9,
+        'max_zoom': 17,
         'max_area_km2': 50,
         'max_size_mb': 1500,
         'max_tiles': 20000,
