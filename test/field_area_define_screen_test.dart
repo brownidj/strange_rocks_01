@@ -12,7 +12,7 @@ import 'package:strange_rocks_01/features/field_packs/presentation/screens/field
 
 void main() {
   group('FieldAreaDefineScreen', () {
-    testWidgets('region mode descends level when quadrant is tapped', (
+    testWidgets('region mode descends level when map is tapped', (
       tester,
     ) async {
       addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -20,8 +20,7 @@ void main() {
       await tester.pumpWidget(_testApp());
 
       expect(find.text('Level: z7'), findsOneWidget);
-
-      await tester.tap(find.byKey(const ValueKey<String>('region-quadrant-1')));
+      await tester.tap(find.byKey(const ValueKey<String>('define-region-map')));
       await tester.pump();
 
       expect(find.text('Level: z8'), findsOneWidget);

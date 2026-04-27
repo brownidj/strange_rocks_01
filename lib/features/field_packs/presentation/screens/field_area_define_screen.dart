@@ -13,7 +13,6 @@ class FieldAreaDefineScreen extends StatefulWidget {
   State<FieldAreaDefineScreen> createState() => _FieldAreaDefineScreenState();
 }
 
-enum _RegionQuadrant { one, two, three, four }
 enum _AreaSelectionMode { region, pins }
 
 class _RegionBounds {
@@ -32,35 +31,17 @@ class _RegionBounds {
   double get centerLon => (minLon + maxLon) / 2;
   double get centerLat => (minLat + maxLat) / 2;
 
-  _RegionBounds split(_RegionQuadrant quadrant) {
-    final midLon = centerLon;
-    final midLat = centerLat;
-    return switch (quadrant) {
-      _RegionQuadrant.one => _RegionBounds(
-        minLon: minLon,
-        minLat: midLat,
-        maxLon: midLon,
-        maxLat: maxLat,
-      ),
-      _RegionQuadrant.two => _RegionBounds(
-        minLon: midLon,
-        minLat: midLat,
-        maxLon: maxLon,
-        maxLat: maxLat,
-      ),
-      _RegionQuadrant.three => _RegionBounds(
-        minLon: minLon,
-        minLat: minLat,
-        maxLon: midLon,
-        maxLat: midLat,
-      ),
-      _RegionQuadrant.four => _RegionBounds(
-        minLon: midLon,
-        minLat: minLat,
-        maxLon: maxLon,
-        maxLat: midLat,
-      ),
-    };
+  _RegionBounds centeredZoomIn({required double centerLon, required double centerLat}) {
+    final width = maxLon - minLon;
+    final height = maxLat - minLat;
+    final nextWidth = width / 2;
+    final nextHeight = height / 2;
+    return _RegionBounds(
+      minLon: centerLon - (nextWidth / 2),
+      minLat: centerLat - (nextHeight / 2),
+      maxLon: centerLon + (nextWidth / 2),
+      maxLat: centerLat + (nextHeight / 2),
+    );
   }
 
   Map<String, Object?> toFeatureCollection() {
@@ -92,12 +73,6 @@ class _RegionBounds {
   }
 }
 
-class _RegionTrailStep {
-  const _RegionTrailStep(this.quadrant);
-
-  final _RegionQuadrant quadrant;
-}
-
 class _GeoPoint {
   const _GeoPoint({required this.lon, required this.lat});
 
@@ -106,6 +81,8 @@ class _GeoPoint {
 }
 
 class _FieldAreaDefineScreenState extends State<FieldAreaDefineScreen> {
+  static const _maxTapZoomSteps = 8;
+  static const _baseRegionLevel = 7;
   static const _qldBounds = _RegionBounds(
     minLon: 137.95,
     minLat: -29.20,
@@ -123,9 +100,11 @@ class _FieldAreaDefineScreenState extends State<FieldAreaDefineScreen> {
   FieldImagerySource _imagerySource = FieldImagerySource.qimageryAerial;
   _AreaSelectionMode _selectionMode = _AreaSelectionMode.region;
   _RegionBounds _regionBounds = _qldBounds;
-  int _regionLevel = 7;
-  List<_RegionTrailStep> _trail = const <_RegionTrailStep>[];
+  int _regionLevel = _baseRegionLevel;
+  List<_RegionBounds> _trail = const <_RegionBounds>[];
   List<_GeoPoint> _pins = const <_GeoPoint>[];
+  Offset? _mapPointerDownLocal;
+  bool _mapPointerMoved = false;
 
   @override
   void initState() {
@@ -165,11 +144,23 @@ class _FieldAreaDefineScreenState extends State<FieldAreaDefineScreen> {
     Navigator.of(context).pop(true);
   }
 
-  void _selectQuadrant(_RegionQuadrant quadrant) {
+  void _zoomInToTap(Offset localPosition, Size size) {
+    if (_selectionMode != _AreaSelectionMode.region) {
+      return;
+    }
+    if (_regionLevel >= (_baseRegionLevel + _maxTapZoomSteps)) {
+      return;
+    }
+    final width = size.width <= 0 ? 1.0 : size.width;
+    final height = size.height <= 0 ? 1.0 : size.height;
+    final nx = (localPosition.dx / width).clamp(0.0, 1.0);
+    final ny = (localPosition.dy / height).clamp(0.0, 1.0);
+    final lon = _regionBounds.minLon + (_regionBounds.maxLon - _regionBounds.minLon) * nx;
+    final lat = _regionBounds.maxLat - (_regionBounds.maxLat - _regionBounds.minLat) * ny;
     setState(() {
-      _regionBounds = _regionBounds.split(quadrant);
+      _trail = <_RegionBounds>[..._trail, _regionBounds];
+      _regionBounds = _regionBounds.centeredZoomIn(centerLon: lon, centerLat: lat);
       _regionLevel += 1;
-      _trail = <_RegionTrailStep>[..._trail, _RegionTrailStep(quadrant)];
       _pins = const <_GeoPoint>[];
     });
   }
@@ -178,17 +169,12 @@ class _FieldAreaDefineScreenState extends State<FieldAreaDefineScreen> {
     if (_trail.isEmpty) {
       return;
     }
-    final updated = List<_RegionTrailStep>.from(_trail)..removeLast();
-    var bounds = _qldBounds;
-    var level = 7;
-    for (final step in updated) {
-      bounds = bounds.split(step.quadrant);
-      level += 1;
-    }
+    final updated = List<_RegionBounds>.from(_trail);
+    final previousBounds = updated.removeLast();
     setState(() {
       _trail = updated;
-      _regionBounds = bounds;
-      _regionLevel = level;
+      _regionBounds = previousBounds;
+      _regionLevel -= 1;
       _pins = const <_GeoPoint>[];
     });
   }
@@ -196,8 +182,8 @@ class _FieldAreaDefineScreenState extends State<FieldAreaDefineScreen> {
   void _resetRegion() {
     setState(() {
       _regionBounds = _qldBounds;
-      _regionLevel = 7;
-      _trail = const <_RegionTrailStep>[];
+      _regionLevel = _baseRegionLevel;
+      _trail = const <_RegionBounds>[];
       _pins = const <_GeoPoint>[];
     });
   }
@@ -223,6 +209,34 @@ class _FieldAreaDefineScreenState extends State<FieldAreaDefineScreen> {
     setState(() {
       _pins = <_GeoPoint>[..._pins, _GeoPoint(lon: lon, lat: lat)];
     });
+  }
+
+  void _onMapPointerDown(PointerDownEvent event) {
+    _mapPointerDownLocal = event.localPosition;
+    _mapPointerMoved = false;
+  }
+
+  void _onMapPointerMove(PointerMoveEvent event) {
+    final down = _mapPointerDownLocal;
+    if (down == null) {
+      return;
+    }
+    if ((event.localPosition - down).distance > 10) {
+      _mapPointerMoved = true;
+    }
+  }
+
+  void _onMapPointerUp(PointerUpEvent event, Size size) {
+    final down = _mapPointerDownLocal;
+    _mapPointerDownLocal = null;
+    if (down == null || _mapPointerMoved) {
+      return;
+    }
+    if (_selectionMode == _AreaSelectionMode.pins) {
+      _addPinAtPosition(event.localPosition, size);
+      return;
+    }
+    _zoomInToTap(event.localPosition, size);
   }
 
   void _clearPins() {
@@ -270,21 +284,19 @@ class _FieldAreaDefineScreenState extends State<FieldAreaDefineScreen> {
     ).showSnackBar(const SnackBar(content: Text('GeoJSON updated from pins')));
   }
 
-  String _quadrantLabel(_RegionQuadrant quadrant) {
-    return switch (quadrant) {
-      _RegionQuadrant.one => '1',
-      _RegionQuadrant.two => '2',
-      _RegionQuadrant.three => '3',
-      _RegionQuadrant.four => '4',
-    };
+  String _zoomProgressText() {
+    final used = _regionLevel - _baseRegionLevel;
+    return '$used/$_maxTapZoomSteps zoom taps';
   }
 
-  String _gridPathText() {
-    if (_trail.isEmpty) {
-      return 'QLD';
-    }
-    final labels = _trail.map((step) => _quadrantLabel(step.quadrant)).join(' > ');
-    return 'QLD > $labels';
+  String _zoomContextLabel() {
+    return switch (_regionLevel) {
+      <= 8 => 'State / City overview',
+      <= 10 => 'District scale',
+      <= 12 => 'Suburb scale',
+      <= 14 => 'Street scale',
+      _ => 'Property / site scale',
+    };
   }
 
   String _previewUrl() {
@@ -307,53 +319,54 @@ class _FieldAreaDefineScreenState extends State<FieldAreaDefineScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Define Region')),
-      body: AnimatedBuilder(
-        animation: widget.controller,
-        builder: (context, _) {
-          return AbsorbPointer(
+    return AnimatedBuilder(
+      animation: widget.controller,
+      builder: (context, _) {
+        final bottomInset = MediaQuery.of(context).viewPadding.bottom;
+        return Scaffold(
+          appBar: AppBar(title: const Text('Define Region')),
+          body: AbsorbPointer(
             absorbing: widget.controller.isLoading,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Form(
-                key: _formKey,
-                child: ListView(
-                  children: [
+            child: SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Form(
+                  key: _formKey,
+                  child: ListView(
+                    keyboardDismissBehavior:
+                        ScrollViewKeyboardDismissBehavior.onDrag,
+                    padding: const EdgeInsets.only(bottom: 24),
+                    children: [
                     Text(
-                      'Start broad in Region mode, then switch to Pins mode for a detailed polygon.',
+                      'Start on the same initial tile. In Region mode, tap a point to center and zoom in by one level.',
                       style: Theme.of(context).textTheme.bodyMedium,
                     ),
                     const SizedBox(height: 10),
-                    SegmentedButton<_AreaSelectionMode>(
-                      key: const ValueKey('define-selection-mode'),
-                      segments: const <ButtonSegment<_AreaSelectionMode>>[
-                        ButtonSegment<_AreaSelectionMode>(
-                          value: _AreaSelectionMode.region,
-                          label: Text(
-                            'Region',
-                            key: ValueKey('define-region-mode-button'),
-                          ),
-                          icon: Icon(Icons.grid_view),
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        ChoiceChip(
+                          key: const ValueKey('define-region-mode-button'),
+                          label: const Text('Region'),
+                          selected: _selectionMode == _AreaSelectionMode.region,
+                          onSelected: (_) {
+                            setState(() {
+                              _selectionMode = _AreaSelectionMode.region;
+                            });
+                          },
                         ),
-                        ButtonSegment<_AreaSelectionMode>(
-                          value: _AreaSelectionMode.pins,
-                          label: Text(
-                            'Pins',
-                            key: ValueKey('define-pins-mode-button'),
-                          ),
-                          icon: Icon(Icons.place),
+                        ChoiceChip(
+                          key: const ValueKey('define-pins-mode-button'),
+                          label: const Text('Pins'),
+                          selected: _selectionMode == _AreaSelectionMode.pins,
+                          onSelected: (_) {
+                            setState(() {
+                              _selectionMode = _AreaSelectionMode.pins;
+                            });
+                          },
                         ),
                       ],
-                      selected: <_AreaSelectionMode>{_selectionMode},
-                      onSelectionChanged: (selection) {
-                        if (selection.isEmpty) {
-                          return;
-                        }
-                        setState(() {
-                          _selectionMode = selection.first;
-                        });
-                      },
                     ),
                     const SizedBox(height: 10),
                     Row(
@@ -362,11 +375,16 @@ class _FieldAreaDefineScreenState extends State<FieldAreaDefineScreen> {
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(
-                            _gridPathText(),
+                            _zoomProgressText(),
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
                       ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Scale: ${_zoomContextLabel()}',
+                      style: Theme.of(context).textTheme.bodySmall,
                     ),
                     const SizedBox(height: 6),
                     Text(
@@ -384,15 +402,12 @@ class _FieldAreaDefineScreenState extends State<FieldAreaDefineScreen> {
                               constraints.maxWidth,
                               constraints.maxHeight,
                             );
-                            return GestureDetector(
+                            return Listener(
                               key: const ValueKey('define-region-map'),
-                              behavior: HitTestBehavior.opaque,
-                              onTapUp: _selectionMode == _AreaSelectionMode.pins
-                                  ? (details) => _addPinAtPosition(
-                                      details.localPosition,
-                                      size,
-                                    )
-                                  : null,
+                              behavior: HitTestBehavior.translucent,
+                              onPointerDown: _onMapPointerDown,
+                              onPointerMove: _onMapPointerMove,
+                              onPointerUp: (event) => _onMapPointerUp(event, size),
                               child: Stack(
                                 fit: StackFit.expand,
                                 children: [
@@ -418,8 +433,6 @@ class _FieldAreaDefineScreenState extends State<FieldAreaDefineScreen> {
                                           ),
                                         ),
                                   ),
-                                  if (_selectionMode == _AreaSelectionMode.region)
-                                    _QuadrantOverlay(onTap: _selectQuadrant),
                                   IgnorePointer(
                                     child: CustomPaint(
                                       painter: _PinOverlayPainter(
@@ -438,15 +451,14 @@ class _FieldAreaDefineScreenState extends State<FieldAreaDefineScreen> {
                     const SizedBox(height: 10),
                     Row(
                       children: [
-                        OutlinedButton.icon(
+                        OutlinedButton(
                           onPressed: _trail.isEmpty ? null : _backRegion,
-                          icon: const Icon(Icons.arrow_back),
-                          label: const Text('Back'),
+                          child: const Icon(Icons.arrow_back),
                         ),
                         const SizedBox(width: 8),
                         OutlinedButton(
                           onPressed: _resetRegion,
-                          child: const Text('Reset to QLD'),
+                          child: const Text('Reset'),
                         ),
                         const Spacer(),
                         FilledButton.icon(
@@ -474,14 +486,14 @@ class _FieldAreaDefineScreenState extends State<FieldAreaDefineScreen> {
                         FilledButton.icon(
                           onPressed: _pins.length >= 3 ? _applyPinsToGeoJson : null,
                           icon: const Icon(Icons.polyline),
-                          label: const Text('Use Pins as Area'),
+                          label: const Text('Add'),
                         ),
                       ],
                     ),
                     const SizedBox(height: 6),
                     Text(
                       _selectionMode == _AreaSelectionMode.region
-                          ? 'Tap 1-4 to narrow the selected region.'
+                          ? 'Tap on the map to zoom in. After 8 taps, switch to Pins mode for polygon detail.'
                           : 'Tap map to drop pins for a detailed polygon inside the selected region.',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
@@ -546,88 +558,30 @@ class _FieldAreaDefineScreenState extends State<FieldAreaDefineScreen> {
                         return null;
                       },
                     ),
-                    const SizedBox(height: 12),
-                    SizedBox(
-                      width: double.infinity,
-                      child: FilledButton.icon(
-                        onPressed: _submit,
-                        icon: const Icon(Icons.download),
-                        label: Text(
-                          widget.controller.isLoading
-                              ? 'Generating Pack...'
-                              : 'Generate and Download Pack',
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _QuadrantOverlay extends StatelessWidget {
-  const _QuadrantOverlay({required this.onTap});
-
-  final ValueChanged<_RegionQuadrant> onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    Widget cell(_RegionQuadrant quadrant, String label) {
-      return Expanded(
-        child: GestureDetector(
-          key: ValueKey<String>('region-quadrant-$label'),
-          onTap: () => onTap(quadrant),
-          child: Container(
-            decoration: BoxDecoration(
-              color: const Color(0x22000000),
-              border: Border.all(color: const Color(0xFFFFE066), width: 1.2),
-            ),
-            child: Center(
-              child: Text(
-                label,
-                style: const TextStyle(
-                  color: Color(0xFFFFE066),
-                  fontWeight: FontWeight.w700,
-                  fontSize: 26,
-                  shadows: [
-                    Shadow(
-                      color: Colors.black54,
-                      blurRadius: 5,
-                      offset: Offset(0, 2),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
           ),
-        ),
-      );
-    }
-
-    return Column(
-      children: [
-        Expanded(
-          child: Row(
-            children: [
-              cell(_RegionQuadrant.one, '1'),
-              cell(_RegionQuadrant.two, '2'),
-            ],
+          bottomNavigationBar: SafeArea(
+            top: false,
+            minimum: EdgeInsets.fromLTRB(16, 8, 16, bottomInset + 12),
+            child: SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: widget.controller.isLoading ? null : _submit,
+                icon: const Icon(Icons.download),
+                label: Text(
+                  widget.controller.isLoading
+                      ? 'Generating Pack...'
+                      : 'Generate and Download Pack',
+                ),
+              ),
+            ),
           ),
-        ),
-        Expanded(
-          child: Row(
-            children: [
-              cell(_RegionQuadrant.three, '3'),
-              cell(_RegionQuadrant.four, '4'),
-            ],
-          ),
-        ),
-      ],
+        );
+      },
     );
   }
 }

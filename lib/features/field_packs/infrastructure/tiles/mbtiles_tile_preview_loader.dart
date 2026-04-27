@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:path/path.dart' as p;
@@ -199,6 +200,63 @@ LIMIT 1;
           bounds.minRow,
           bounds.maxRow,
         ],
+      );
+      if (rows.isEmpty) {
+        return null;
+      }
+      return TileCoordinate(
+        zoom: zoom,
+        tileColumn: rows.first['tile_column'] as int,
+        tileRow: rows.first['tile_row'] as int,
+      );
+    } finally {
+      db.dispose();
+    }
+  }
+
+  TileCoordinate? nearestTileToLonLat({
+    required String packRootPath,
+    required int zoom,
+    required double lon,
+    required double lat,
+  }) {
+    final dbPath = p.join(packRootPath, 'basemap.mbtiles');
+    final dbFile = File(dbPath);
+    if (!dbFile.existsSync()) {
+      throw StateError('basemap.mbtiles not found at $dbPath');
+    }
+
+    final world = 1 << zoom;
+    final clampedLon = lon.clamp(-180.0, 180.0);
+    final clampedLat = lat.clamp(-85.05112878, 85.05112878);
+    final normalizedX = (clampedLon + 180.0) / 360.0;
+    final x = (normalizedX * world).floor().clamp(0, world - 1);
+
+    final latRad = clampedLat * math.pi / 180.0;
+    final mercatorY =
+        (1 - math.log(math.tan(latRad) + (1 / math.cos(latRad))) / math.pi) /
+        2;
+    final yXyz = (mercatorY * world).floor().clamp(0, world - 1);
+    final yTms = (world - 1 - yXyz).clamp(0, world - 1);
+
+    final db = sqlite3.open(dbPath);
+    try {
+      final schemeRows = db.select(
+        "SELECT value FROM metadata WHERE name = 'scheme' LIMIT 1;",
+      );
+      final scheme = schemeRows.isEmpty
+          ? 'tms'
+          : ((schemeRows.first['value'] as String?) ?? 'tms').toLowerCase();
+      final targetRow = scheme == 'xyz' ? yXyz : yTms;
+      final rows = db.select(
+        '''
+SELECT tile_column, tile_row
+FROM tiles
+WHERE zoom_level = ?
+ORDER BY (ABS(tile_column - ?) + ABS(tile_row - ?)), tile_column, tile_row
+LIMIT 1;
+''',
+        <Object?>[zoom, x, targetRow],
       );
       if (rows.isEmpty) {
         return null;
