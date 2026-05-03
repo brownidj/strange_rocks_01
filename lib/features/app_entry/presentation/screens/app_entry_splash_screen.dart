@@ -5,12 +5,14 @@ import 'package:permission_handler/permission_handler.dart';
 
 class AppEntrySplashScreen extends StatefulWidget {
   const AppEntrySplashScreen({
+    this.checkAdhocUploadBackendStatus,
     required this.onAdhocFossilFinds,
     required this.onFossilHuntingAdventure,
     required this.onPermissionsSettings,
     super.key,
   });
 
+  final Future<bool> Function()? checkAdhocUploadBackendStatus;
   final VoidCallback onAdhocFossilFinds;
   final VoidCallback onFossilHuntingAdventure;
   final VoidCallback onPermissionsSettings;
@@ -26,6 +28,8 @@ class _AppEntrySplashScreenState extends State<AppEntrySplashScreen>
   bool _cameraGranted = false;
   bool _locationGranted = false;
   bool _gpsEnabled = false;
+  bool? _adhocUploadServerOnline;
+  bool _isCheckingAdhocUploadServer = false;
 
   @override
   void initState() {
@@ -51,6 +55,7 @@ class _AppEntrySplashScreenState extends State<AppEntrySplashScreen>
     await Future.wait<void>([
       _refreshVersionBuildLabel(),
       _refreshPermissionsChipVisibility(),
+      _refreshAdhocUploadServerStatus(),
     ]);
   }
 
@@ -91,6 +96,48 @@ class _AppEntrySplashScreenState extends State<AppEntrySplashScreen>
     });
   }
 
+  Future<void> _refreshAdhocUploadServerStatus() async {
+    final checker = widget.checkAdhocUploadBackendStatus;
+    if (checker == null) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _adhocUploadServerOnline = null;
+        _isCheckingAdhocUploadServer = false;
+      });
+      return;
+    }
+
+    if (mounted) {
+      setState(() {
+        _isCheckingAdhocUploadServer = true;
+      });
+    }
+
+    final bool isOnline;
+    try {
+      isOnline = await checker();
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _adhocUploadServerOnline = false;
+        _isCheckingAdhocUploadServer = false;
+      });
+      return;
+    }
+
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _adhocUploadServerOnline = isOnline;
+      _isCheckingAdhocUploadServer = false;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
@@ -127,6 +174,11 @@ class _AppEntrySplashScreenState extends State<AppEntrySplashScreen>
                       cameraGranted: _cameraGranted,
                       locationGranted: _locationGranted,
                       gpsEnabled: _gpsEnabled,
+                      adhocUploadServerOnline: _adhocUploadServerOnline,
+                      isCheckingAdhocUploadServer:
+                          _isCheckingAdhocUploadServer,
+                      onRefreshAdhocUploadServer:
+                          _refreshAdhocUploadServerStatus,
                     ),
                   ),
                   const Spacer(),
@@ -204,11 +256,17 @@ class _ServiceStatusPanel extends StatelessWidget {
     required this.cameraGranted,
     required this.locationGranted,
     required this.gpsEnabled,
+    required this.adhocUploadServerOnline,
+    required this.isCheckingAdhocUploadServer,
+    required this.onRefreshAdhocUploadServer,
   });
 
   final bool cameraGranted;
   final bool locationGranted;
   final bool gpsEnabled;
+  final bool? adhocUploadServerOnline;
+  final bool isCheckingAdhocUploadServer;
+  final VoidCallback onRefreshAdhocUploadServer;
 
   @override
   Widget build(BuildContext context) {
@@ -237,9 +295,69 @@ class _ServiceStatusPanel extends StatelessWidget {
               okText: 'On',
               failText: 'Off',
             ),
+            const SizedBox(height: 6),
+            _BackendStatusRow(
+              isChecking: isCheckingAdhocUploadServer,
+              isOnline: adhocUploadServerOnline,
+              onRefresh: onRefreshAdhocUploadServer,
+            ),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _BackendStatusRow extends StatelessWidget {
+  const _BackendStatusRow({
+    required this.isChecking,
+    required this.isOnline,
+    required this.onRefresh,
+  });
+
+  final bool isChecking;
+  final bool? isOnline;
+  final VoidCallback onRefresh;
+
+  @override
+  Widget build(BuildContext context) {
+    Color dotColor;
+    String statusText;
+    if (isChecking) {
+      dotColor = Colors.amberAccent;
+      statusText = 'Checking...';
+    } else if (isOnline == true) {
+      dotColor = Colors.greenAccent;
+      statusText = 'On';
+    } else if (isOnline == false) {
+      dotColor = Colors.redAccent;
+      statusText = 'Off';
+    } else {
+      dotColor = Colors.white70;
+      statusText = 'Unknown';
+    }
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(Icons.circle, size: 10, color: dotColor),
+        const SizedBox(width: 8),
+        Text(
+          'Adhoc server: $statusText',
+          style: const TextStyle(color: Colors.white, fontSize: 13),
+        ),
+        const SizedBox(width: 4),
+        SizedBox(
+          width: 28,
+          height: 28,
+          child: IconButton(
+            padding: EdgeInsets.zero,
+            tooltip: 'Refresh server status',
+            onPressed: isChecking ? null : onRefresh,
+            icon: const Icon(Icons.refresh, size: 16, color: Colors.white),
+          ),
+        ),
+      ],
     );
   }
 }

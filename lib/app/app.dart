@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:strange_rocks_01/features/adhoc_fossil_finds/infrastructure/repositories/sqlite_adhoc_event_repository.dart';
 import 'package:strange_rocks_01/features/adhoc_fossil_finds/infrastructure/services/location_fallback_service.dart';
@@ -36,6 +39,10 @@ class _StrangeRocksAppState extends State<StrangeRocksApp> {
   static const String _backendBaseUrl = String.fromEnvironment(
     'FIELD_PACK_BACKEND_BASE_URL',
     defaultValue: 'http://127.0.0.1:8080',
+  );
+  static const String _adhocUploadBackendBaseUrl = String.fromEnvironment(
+    'ADHOC_UPLOAD_BACKEND_BASE_URL',
+    defaultValue: 'http://127.0.0.1:8090',
   );
 
   late final FieldPackController _controller;
@@ -102,6 +109,7 @@ class _StrangeRocksAppState extends State<StrangeRocksApp> {
       home: Builder(
         builder: (navigatorContext) {
           return AppEntrySplashScreen(
+            checkAdhocUploadBackendStatus: _checkAdhocUploadBackendStatus,
             onAdhocFossilFinds: () {
               Navigator.of(navigatorContext).push(
                 MaterialPageRoute<void>(
@@ -128,5 +136,28 @@ class _StrangeRocksAppState extends State<StrangeRocksApp> {
         },
       ),
     );
+  }
+
+  Future<bool> _checkAdhocUploadBackendStatus() async {
+    final httpClient = HttpClient()..connectionTimeout = const Duration(seconds: 2);
+    try {
+      final healthUri = Uri.parse(_adhocUploadBackendBaseUrl).resolve('/healthz');
+      final request = await httpClient.getUrl(healthUri);
+      request.headers.set(HttpHeaders.acceptHeader, ContentType.json.mimeType);
+      final response = await request.close().timeout(const Duration(seconds: 3));
+      if (response.statusCode != HttpStatus.ok) {
+        return false;
+      }
+      final raw = await utf8.decoder.bind(response).join();
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map<String, Object?>) {
+        return false;
+      }
+      return decoded['status'] == 'ok';
+    } catch (_) {
+      return false;
+    } finally {
+      httpClient.close(force: true);
+    }
   }
 }
