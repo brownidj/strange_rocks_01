@@ -122,7 +122,7 @@ rg --files "$ROOT_DIR" \
 
 ## Code base architecture state
 
-### Updated: 2026-04-25
+### Updated: 2026-05-03
 
 ### Architecture summary
 - `lib/main.dart` is now a thin composition root only (`WidgetsFlutterBinding` + `runApp`).
@@ -353,6 +353,42 @@ rg --files "$ROOT_DIR" \
   - `lib/features/field_packs/presentation/screens/field_pack_detail_screen.dart`
   - new `View Tiles` button opens tile preview
 
+### Adhoc fossil finds workflow delivered
+- Added splash flow and entry choices:
+  - `I think I found a fossil!`
+  - `Plan and execute a fossil finding trip`
+  - splash now includes app version/build text and permission/service-aware UI affordances.
+- Implemented adhoc collection event workflow with automatic persistence:
+  - event auto-creation on screen entry
+  - default editable base event name + non-editable `/<n>` sequence suffix
+  - finish event increments sequence and starts next event for the same local date
+  - collection date routing based on image capture/exif date.
+- Implemented series behavior and UI:
+  - first series starts on first image
+  - new series can be manually queued (`New series`) and auto-created by rules (distance/max photos)
+  - series viewer with previous/next navigation
+  - 4x5 thumbnail presentation behavior refined to show real thumbnails without placeholders
+  - new-series capture now switches view focus to the newest non-empty series.
+- Implemented photo metadata modal behavior:
+  - image preview modal on photo tap/long-press
+  - `Taken:` value from `EXIF DateTimeOriginal` when available.
+- Implemented GPS and permissions UX for adhoc flow:
+  - GPS red/green icon assets
+  - long-press GPS behavior for acquisition/status modal
+  - startup and entry permission checks for camera/location services.
+- Implemented completed collection events list:
+  - list icon in adhoc header now appears only when completed events exist
+  - list screen renamed to `Completed collection events`
+  - unfinished active events are excluded
+  - unsynced status icon shown per event
+  - delete flow includes `Are you sure?` confirmation modal.
+- Added/updated adhoc widget and controller tests to cover:
+  - visibility gating (`Finish event`, list icon)
+  - completed event filtering
+  - sync status icon rendering regression
+  - delete confirmation + delete behavior
+  - new-series selection behavior.
+
 ### Tests report
 - `flutter analyze`: pass (no issues).
 - `flutter test`: pass.
@@ -376,3 +412,30 @@ rg --files "$ROOT_DIR" \
   - `test/field_pack_compatibility_service_test.dart`
   - `test/field_pack_quota_service_test.dart`
   - updated `test/widget_test.dart` for new app shell.
+- Recent adhoc/splash verification:
+  - `dart analyze lib/features/app_entry/presentation/screens/adhoc_fossil_finds_screen.dart lib/features/app_entry/presentation/screens/adhoc_fossil_finds_screen_widgets.dart lib/features/app_entry/presentation/screens/adhoc_fossil_finds_screen_actions.dart test/adhoc_fossil_finds_screen_test.dart`: pass.
+  - `dart analyze lib/features/app_entry/presentation/screens/adhoc_fossil_finds_screen_event_list.dart test/adhoc_fossil_finds_screen_test.dart test/adhoc_fossil_finds_screen_collection_events_test.dart test/support/adhoc_screen_test_support.dart`: pass.
+  - `flutter test test/adhoc_fossil_finds_screen_test.dart test/adhoc_fossil_finds_screen_collection_events_test.dart test/widget_test.dart`: pass.
+  - `./scripts/check_file_sizes.sh .`: pass.
+
+## Goodness relative to code prompt
+
+### Scoring model
+- Scale: 0-100.
+- Method: weighted score across prompt-aligned dimensions that are directly measurable in the current repository state.
+
+| Dimension | W | Evidence | Score |
+|---|---:|---|---:|
+| Architecture separation (UI/domain/infra boundaries) | 25 | Layered `features/*`; thin app composition | 23/25 |
+| Main entrypoint thinness | 10 | `main.dart` composition-only | 10/10 |
+| File size constraint (`<300` lines) | 20 | `check_file_sizes.sh` clean | 20/20 |
+| Testing additions and regression coverage | 20 | Adhoc + list regression tests expanded | 18/20 |
+| Minimal/focused diffs and maintainability | 10 | Changes localized to feature/test modules | 9/10 |
+| Operational verification (analyze/tests run and recorded) | 15 | Analyze + widget tests passing | 14/15 |
+
+### Goodness calculation
+- Total = `23 + 10 + 20 + 18 + 9 + 14 = 94 / 100`
+
+### Interpretation
+- Current goodness vs prompt: **94/100**.
+- Remaining gaps: broaden integration/Patrol coverage for end-to-end device flows and keep periodic guardrail checks in CI.

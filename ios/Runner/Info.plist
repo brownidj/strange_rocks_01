@@ -26,6 +26,14 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Location is used to tag fossil photos when GPS metadata is unavailable.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Camera is used to take fossil photos for collection series.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Photo library access is used to select fossil photos for collection series.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Photo library add access may be used when handling captured fossil photos.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

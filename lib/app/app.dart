@@ -1,4 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:strange_rocks_01/features/adhoc_fossil_finds/infrastructure/repositories/sqlite_adhoc_event_repository.dart';
+import 'package:strange_rocks_01/features/adhoc_fossil_finds/infrastructure/services/location_fallback_service.dart';
+import 'package:strange_rocks_01/features/adhoc_fossil_finds/infrastructure/services/photo_capture_service.dart';
+import 'package:strange_rocks_01/features/adhoc_fossil_finds/infrastructure/services/photo_metadata_service.dart';
+import 'package:strange_rocks_01/features/adhoc_fossil_finds/infrastructure/services/series_assignment_service.dart';
+import 'package:strange_rocks_01/features/adhoc_fossil_finds/presentation/controllers/adhoc_fossil_finds_controller.dart';
+import 'package:strange_rocks_01/features/app_entry/presentation/screens/adhoc_fossil_finds_screen.dart';
+import 'package:strange_rocks_01/features/app_entry/presentation/screens/app_permissions_screen.dart';
+import 'package:strange_rocks_01/features/app_entry/presentation/screens/app_entry_splash_screen.dart';
 import 'package:strange_rocks_01/features/field_packs/infrastructure/api/http_field_pack_api_client.dart';
 import 'package:strange_rocks_01/features/field_packs/infrastructure/api/http_request_field_pack_use_case.dart';
 import 'package:strange_rocks_01/features/field_packs/infrastructure/compatibility/field_pack_compatibility_service.dart';
@@ -30,6 +39,7 @@ class _StrangeRocksAppState extends State<StrangeRocksApp> {
   );
 
   late final FieldPackController _controller;
+  late final AdhocFossilFindsController _adhocController;
   late final ResumableDownloadService _downloadService;
   late final HttpRequestFieldPackUseCase _requestFieldPackUseCase;
 
@@ -64,12 +74,20 @@ class _StrangeRocksAppState extends State<StrangeRocksApp> {
       downloadFieldPack: pipeline,
       requestFieldPack: _requestFieldPackUseCase,
     );
+    _adhocController = AdhocFossilFindsController(
+      repository: SqliteAdhocEventRepository(FieldPackDatabase()),
+      photoCaptureService: PhotoCaptureService(),
+      photoMetadataService: PhotoMetadataService(),
+      locationFallbackService: LocationFallbackService(),
+      seriesAssignmentService: const SeriesAssignmentService(),
+    );
   }
 
   @override
   void dispose() {
     _downloadService.close();
     _requestFieldPackUseCase.close();
+    _adhocController.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -81,7 +99,34 @@ class _StrangeRocksAppState extends State<StrangeRocksApp> {
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF446B4F)),
       ),
-      home: FieldPackListScreen(controller: _controller),
+      home: Builder(
+        builder: (navigatorContext) {
+          return AppEntrySplashScreen(
+            onAdhocFossilFinds: () {
+              Navigator.of(navigatorContext).push(
+                MaterialPageRoute<void>(
+                  builder: (_) =>
+                      AdhocFossilFindsScreen(controller: _adhocController),
+                ),
+              );
+            },
+            onFossilHuntingAdventure: () {
+              Navigator.of(navigatorContext).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => FieldPackListScreen(controller: _controller),
+                ),
+              );
+            },
+            onPermissionsSettings: () {
+              Navigator.of(navigatorContext).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const AppPermissionsScreen(),
+                ),
+              );
+            },
+          );
+        },
+      ),
     );
   }
 }
